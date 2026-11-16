@@ -1,209 +1,191 @@
 # Expenditures Control
 
-Servidor MCP que guarda tus movimientos bancarios (COP), tomados de las notificaciones del banco, en un archivo SQLite local y permite que Claude responda preguntas de presupuesto por categoría y por mes.
+**Los correos de tu banco, convertidos en un reporte de gastos vivo dentro de Claude.**
+Un servidor MCP local que lee los avisos que tu banco ya te manda, guarda los movimientos en tu computador y muestra un reporte interactivo, al estilo Power BI, dentro de la conversación.
 
 [Read in English](README.md)
 
-## Cómo se ve
+![Reporte interactivo dentro de Claude, tema claro](docs/images/panel-light.png)
 
-Pídele a Claude **"muéstrame mis gastos"** y aparece **dentro de la conversación** un reporte visual e interactivo (Claude y Claude Desktop; es una MCP App, no se abre ningún navegador). Si no encuentras un movimiento ("no encuentro la transferencia del alquiler"), Claude muestra el reporte en el mes correcto con ese movimiento resaltado. Si el cliente no soporta MCP Apps, `abrir_panel` abre el mismo panel en tu navegador: un número protagonista, tu ritmo frente al mes anterior, categorías que se expanden con un clic, y **filtrado cruzado como en Power BI** (haz clic en una categoría, un comercio o un día y todos los gráficos, el ranking y la tabla resaltan esa misma selección), un gráfico día a día y una tabla con búsqueda. Corre solo en tu computador, se actualiza solo y sigue tu tema claro u oscuro. (Datos de demostración.)
+## Por qué existe
 
-![Panel, tema claro](docs/images/panel-light.png)
-![Panel, tema oscuro](docs/images/panel-dark.png)
+Cada compra y cada transferencia dispara un correo de tu banco. Es la única fuente de datos que sirve con cualquier banco, no necesita una API bancaria ni tus credenciales y ya está en tu bandeja. Este proyecto convierte esos correos en datos estructurados que son tuyos, y te deja explorarlos conversando con Claude **o** haciendo clic en un reporte que vive en el chat.
 
-O pregunta en texto.
+- **Cualquier banco, cualquier país.** BBVA Colombia viene incluido. Para otro banco le muestras a Claude 3 o 4 avisos reales y aprende las reglas de lectura, que el servidor prueba contra tus ejemplos antes de guardarlas.
+- **Bancos más fuentes externas.** El banco dice `Apple.com/bill` y nada más; el recibo del proveedor dice qué aplicación era. Los recibos de tiendas y servicios se leen igual que los avisos del banco y se cruzan con lo que el banco informó.
+- **Un reporte con el que se puede jugar.** Haz clic en una categoría, un comercio o un día y todos los gráficos, el ranking y la tabla resaltan esa misma selección.
+- **Pregunta en lenguaje natural.** "No encuentro la transferencia del alquiler" abre el reporte en el mes correcto con ese movimiento resaltado.
+- **Local primero.** Tus datos viven en un solo archivo SQLite en tu computador. Sin nube, sin cuenta.
 
-Todas las cifras son inventadas.
+![Filtrado cruzado: al elegir una categoría se resalta su parte en cada día y se filtra la tabla](docs/images/panel-filter.png)
 
-> **Tú:** ¿Cómo me fue en octubre por categoría?
->
-> **Claude:** Octubre 2026, gastado vs presupuesto:
->
-> | Categoría | Gastado | Presupuesto | Usado |
-> |---|---:|---:|---:|
-> | Supermercado | 612.400 | 700.000 | 87% (alerta) |
-> | Suscripcion | 148.900 | 200.000 | 74% |
-> | Fijo | 1.350.000 | 1.350.000 | 100% |
-> | Otro | 203.500 | sin presupuesto | |
->
-> Hay 41.000 COP de gasto sin categoría (2 comercios). ¿Quieres clasificarlos?
->
-> <details>
-> <summary>Detalle: Supermercado</summary>
->
-> | Fecha | Comercio | Monto |
-> |---|---|---:|
-> | 2026-10-03 | Supermercado Ejemplo | 134.588 |
-> | 2026-10-11 | Tienda Ejemplo | 88.200 |
-> | 2026-10-19 | Supermercado Ejemplo | 201.350 |
-> | 2026-10-27 | Mercado Demo | 188.262 |
->
-> </details>
+## Míralo en una conversación
 
-El servidor puede leer por sí mismo tus correos de notificación del banco (acceso de solo lectura a Gmail, con una configuración única), extraer los datos con reglas por banco y dejar en el contexto de Claude solo un resumen corto. Así es práctico cargar meses de historial de una vez. Sin esa configuración, Claude igual puede leer los correos recientes con su propio conector de Gmail y entregarle al servidor los datos extraídos.
+| Tú dices | Qué pasa |
+|---|---|
+| "Muéstrame mis gastos" | El reporte interactivo aparece dentro de la conversación: tu ritmo frente al mes anterior, categorías, un gráfico día a día y una tabla con búsqueda. |
+| "No encuentro la transferencia del alquiler" | Claude entiende "alquiler" por tu lista de gastos fijos, abre el mes correcto y resalta el movimiento. |
+| "¿Qué suscripciones estoy pagando que no tengo anotadas?" | Compara lo que se cobró de verdad con tu lista y muestra las olvidadas. |
+| "Aprende los avisos de mi banco Galicia" | Claude te pide 3 o 4 correos reales, confirma contigo cómo se lee cada uno, redacta las reglas y las guarda solo si todos los ejemplos pasan. |
+| "Sincroniza los correos de mi banco desde septiembre" | Con Gmail conectado, el servidor descarga y lee los correos por su cuenta y devuelve solo un resumen corto. |
+
+## Lo más importante
+
+- **Reporte interactivo como MCP App**, dibujado dentro de Claude (y Claude Desktop). El modelo solo recibe un resumen corto: el reporte pide sus datos con una herramienta privada, así que tus movimientos nunca entran al contexto del modelo.
+- **Formatos de banco aprendidos.** Reglas declarativas, validadas con un esquema, por remitente; probadas contra ejemplos confirmados y guardadas en tu base. Las reglas aprendidas tienen prioridad sobre las incluidas, así que un banco se puede reenseñar cuando cambian sus correos.
+- **Sincronización de Gmail desde el servidor.** OAuth de solo lectura (PKCE, loopback), con el token guardado localmente. Meses de historial se cargan en segundos sin pasar por el modelo.
+- **Recibos que completan el cuadro.** Un recibo puede nombrar en qué fue un cobro genérico de la tarjeta, cruzado por monto y fecha; y un recibo en dólares de un comercio que tu banco nunca informa se convierte con la tasa oficial de ese día y queda marcado como estimado, sin contar jamás un cobro dos veces.
+- **Gastos fijos y suscripciones olvidadas.** Importas una hoja con lo que esperas pagar; el servidor te dice qué se pagó, qué falta y qué pagas sin tenerlo anotado. Los pagos PSE, que ocultan al beneficiario, se emparejan por monto.
+- **Contabilidad sensata.** Las conversiones de USD a COP cuentan como ingreso, los pagos de tarjeta de crédito son transferencias propias (sin doble conteo), y PSE y las transferencias a personas tienen su propia categoría.
+- **Segura por construcción.** CSP estricta, token secreto y solo `127.0.0.1` para el navegador; las expresiones regulares propuestas por un modelo corren en un contexto aislado con límite de tiempo; el texto tomado de los correos se limpia y se limita en longitud.
+
+![Tema oscuro](docs/images/panel-dark.png)
 
 ## Cómo funciona
 
 ```mermaid
 flowchart LR
-    U[Tú] <--> C[Cliente Claude]
-    C <-->|"stdio (herramientas MCP)"| S[Servidor expenditures-control]
+    U[Tú] <--> C[Claude]
+    C <-->|"Herramientas MCP"| S[expenditures-control]
     S <--> DB[(Archivo SQLite local)]
-    S <-->|"solo lectura, OAuth"| GA[API de Gmail]
-    GA --- M[Correos del banco]
-    S --> P[Parsers por banco: regex, sin modelo]
-    C -. "opcional: conector de Gmail de Claude" .-> M
+    S <-->|"solo lectura, OAuth"| G[API de Gmail]
+    G --- B[Avisos del banco]
+    G --- V["Recibos de proveedores: Apple, un servicio en dólares..."]
+    S --> P["Reglas de lectura por remitente: incluidas o aprendidas"]
+    B --> P
+    V --> P
+    P --> X{"Cruce banco y proveedor"}
+    X -->|"el recibo nombra un cobro genérico"| DB
+    X -->|"un cobro que el banco nunca informó"| DB
+    X -->|"el banco ya lo informó"| O["Se cuenta una sola vez"]
+    S -->|"herramienta privada de datos"| R["Reporte interactivo (MCP App)"]
+    R --> U
+    C -. "opcional: el conector de Gmail de Claude" .-> B
 ```
 
-El servidor no tiene modelo de lenguaje. Con Gmail conectado, el servidor descarga los correos de tus remitentes autorizados, extrae los movimientos con parsers por banco (expresiones regulares sobre el bloque "Detalles de la operación") y devuelve solo un resumen; Claude clasifica comercios y responde preguntas. El flujo completo está en [docs/diagrama-proceso-mcp.md](docs/diagrama-proceso-mcp.md).
+El servidor no tiene modelo de lenguaje. Claude hace lo que requiere criterio (clasificar comercios, explicar, aprender un banco nuevo desde ejemplos); el servidor valida, guarda, agrega y extrae. El flujo completo está en [docs/diagrama-proceso-mcp.md](docs/diagrama-proceso-mcp.md).
 
-## Privacidad
+## Empezar
 
-- El acceso a Gmail es opcional y de solo lectura (`gmail.readonly`). Una vez conectado, el servidor descarga únicamente los correos de los remitentes que autorizaste, solo para extraer los datos del movimiento.
-- El token de OAuth vive en `~/.gastos-mcp/gmail-token.json` en tu computador (permisos solo para tu usuario). Puedes borrarlo cuando quieras con `desconectar_gmail` y revocar el permiso en <https://myaccount.google.com/permissions>.
-- Solo se guardan datos extraídos: fecha, monto, comercio, banco, tipo (gasto, ingreso, transferencia propia) y categoría. Nunca el texto de un correo.
-- Todo vive en archivos en tu computador. El único tráfico de red de este servidor es hacia las APIs de Google (Gmail e inicio de sesión) cuando conectas Gmail.
-- Los nombres de comercios, montos y asuntos que devuelve el servidor los ve Claude, como cualquier resultado de una herramienta.
-- El panel se sirve solo en `127.0.0.1` (nunca en la red), exige un token secreto que viaja en el fragmento de la URL, rechaza cualquier otro `Host`, es de solo lectura y no carga nada de internet.
-- Ojo: cuando Claude lee tus correos o consulta los datos, ese contenido lo procesa tu cliente de Claude bajo sus propios términos de privacidad.
+**Requisitos:** Node.js 22.13 o superior (el servidor usa `node:sqlite`, que viene incluido) y Claude Desktop (o cualquier cliente MCP que ejecute servidores stdio; las MCP Apps necesitan un cliente que las soporte, como Claude Desktop).
 
-## Requisitos
-
-- Node.js 22.13 o superior (el servidor usa `node:sqlite`, incluido en Node). Verifica con `node --version`.
-- Un cliente MCP: Claude Code, Claude Desktop u otro que ejecute servidores stdio.
-- Para sincronizar correo: conectar Gmail al servidor (tres clics, ver [docs/gmail-setup.es.md](docs/gmail-setup.es.md)) o usar el conector de Gmail de Claude.
-
-## Instalación
-
-### A. Claude Code
+### Claude Desktop (paquete de un clic)
 
 ```bash
-claude mcp add gastos -- npx -y expenditures-control
+git clone https://github.com/estebanjc78/expenditures-control.git
+cd expenditures-control
+npm install
+npm run build:mcpb        # genera build/expenditures-control.mcpb
 ```
 
-Para elegir dónde queda la base de datos:
+Abre `build/expenditures-control.mcpb` con Claude Desktop y pulsa **Instalar**. Permite el reporte cuando Claude lo pida.
+
+### Claude Code u otros clientes
 
 ```bash
-claude mcp add gastos -e GASTOS_DB=/ruta/gastos.db -- npx -y expenditures-control
+npm install && npm run build
+claude mcp add gastos -- node "/ruta/absoluta/a/dist/index.js"
 ```
 
-> El paquete npm aún no está publicado (ver Estado abajo). Mientras tanto, ejecútalo desde un clon: `npm install && npm run build` y luego `claude mcp add gastos -- node "/ruta/absoluta/dist/index.js"`.
+Define `GASTOS_DB=/ruta/a/gastos.db` en el entorno del servidor para elegir dónde queda la base (por defecto `~/.gastos-mcp/gastos.db`). Si el cliente no soporta MCP Apps, `abrir_panel` abre el mismo panel en tu navegador.
 
-### B. Claude Desktop (.mcpb, doble clic)
+### Primeros pasos
 
-Construye el paquete desde el repositorio (`npm run build:mcpb` genera `build/expenditures-control.mcpb`), ábrelo con Claude Desktop y pulsa **Install**. El Node integrado en Claude Desktop incluye `node:sqlite` y el paquete se ha usado ahí para guardar movimientos. Todavía no hay descargas publicadas. Si prefieres no construirlo, usa la opción C.
+1. **Agrega el remitente de tu banco:** "Agrega `BBVA@bbvanet.com.co` como remitente de banco." Para otro banco, mira [Bancos y proveedores](#bancos-y-proveedores).
+2. **Carga movimientos.** O le pides a Claude que lea correos recientes con su propio conector de Gmail, o conectas Gmail al servidor una sola vez ("Conecta mi Gmail") y pides "Sincroniza los correos de mi banco desde 2026-09-01". Mira [docs/gmail-setup.es.md](docs/gmail-setup.es.md).
+3. **Míralo:** "Muéstrame mis gastos."
+4. **Opcional:** importa una hoja de gastos fijos y fija un presupuesto ("Fija un presupuesto de supermercado de 4.000.000 para todos los meses").
 
-### C. Configuración manual en JSON (Claude Desktop y otros clientes)
+Hoja de gastos fijos: la primera hoja, con encabezados `nombre`, `monto`, `comercio` (la palabra clave para detectar el pago: palabras completas, sin distinguir tildes ni mayúsculas; un `*` al final también acepta una última palabra truncada, como `compania de med*`). Importar reemplaza la lista anterior.
 
-Agrega esto a la configuración MCP del cliente (en Claude Desktop: Ajustes, Desarrollador, Editar configuración):
+## Bancos y proveedores
 
-```json
-{
-  "mcpServers": {
-    "gastos": {
-      "command": "npx",
-      "args": ["-y", "expenditures-control"],
-      "env": { "GASTOS_DB": "/ruta/gastos.db" }
-    }
-  }
-}
-```
+### Bancos
 
-`env` es opcional. El Node que use el cliente debe ser 22.13 o superior; si tu cliente usa otro Node, pon en `command` la ruta completa de un `node` reciente y en `args` la ruta a `dist/index.js`.
+BBVA Colombia viene incluido: compras, dinero recibido (Bre-B y transferencias), transferencias propias, transferencias a personas, pagos PSE, pagos de facturas y pagos de tarjeta de crédito.
 
-## Dónde viven los datos
+Para cualquier otro banco, **enséñaselo con ejemplos**: agrega el remitente, pídele a Claude que aprenda ese banco, confirma cómo se leen 3 o 4 de tus avisos reales y las reglas quedan guardadas en tu base. Detalles, formato de las reglas y modelo de seguridad: [docs/learn-a-bank.es.md](docs/learn-a-bank.es.md). Está probado con ejemplos inventados de Argentina y México, todavía no con correos reales de esos bancos.
 
-La base de datos es un solo archivo. Por defecto: `~/.gastos-mcp/gastos.db` (la carpeta se crea con permisos privados). Con `GASTOS_DB` eliges otra ruta; `~` se expande, vacío cuenta como no definida y `:memory:` da una base desechable.
+### Proveedores (recibos de tiendas y servicios)
 
-- **Respaldo:** cierra el cliente y copia el archivo (`cp ~/.gastos-mcp/gastos.db ~/respaldo-gastos.db`). Copia también `gastos.db-wal` y `gastos.db-shm` si existen al lado.
-- **Borrar todo:** elimina el archivo (`rm ~/.gastos-mcp/gastos.db*`). El próximo arranque crea una base vacía.
+Un proveedor es cualquier remitente cuyos correos dicen más sobre tu plata que el banco. Se le enseña con ejemplos igual que a un banco, y cada plantilla de recibo hace una de tres cosas:
 
-## Primer uso
+| Trabajo | Ejemplo | Qué pasa |
+|---|---|---|
+| **Enriquecer** | El banco informa `Apple.com/bill` $24.000; el recibo de Apple dice "Plan Individual de una app de música" | El movimiento con ese monto y fecha (hasta 3 días de diferencia) recibe el nombre del producto; su comercio y su categoría no cambian. Si todavía no encaja ninguno, el recibo espera a la próxima sincronización y se abandona a los 30 días. |
+| **Completar** | Un servicio cobra en dólares una tarjeta que tu banco no informa | El recibo se registra en pesos con la tasa oficial de ese día y queda marcado como estimado. Sin tasa, va a revisión. |
+| **No duplicar** | El banco ya informó ese mismo cobro en dólares | El recibo se omite. |
 
-1. **Agrega tus remitentes bancarios.** Pídele a Claude: "Agrega `BBVA@bbvanet.com.co` como remitente bancario." No hay ninguno por defecto; el servidor solo trata como notificación bancaria el correo de estas direcciones.
-2. **Conecta Gmail (una vez).** Pide: "Conecta mi Gmail", elige tu cuenta en el navegador y pulsa **Permitir** (Google muestra primero un aviso de "app no verificada"; ver [docs/gmail-setup.es.md](docs/gmail-setup.es.md)).
-3. **Sincroniza.** Pide: "Sincroniza mis correos del banco desde 2026-09-01." El servidor descarga y procesa los correos por sí mismo y devuelve un resumen (registrados, omitidos, para revisar, comercios sin categoría). Se puede repetir sin riesgo. Sin la conexión de Gmail, Claude puede leer los correos recientes con su propio conector; ver [docs/sync-guide.es.md](docs/sync-guide.es.md).
-4. **Clasifica comercios.** Claude clasifica los comercios nuevos por su nombre (`supermercado`, `suscripcion`, `fijo`, `otro`, `pse` o `transferencia`), te muestra la lista y tú corriges lo que esté mal. Cada comercio se clasifica una vez y se recuerda, también para movimientos pasados.
-5. **Define presupuestos.** "Fija un presupuesto de 700.000 para supermercado en todos los meses."
-6. **Pregunta.** "¿Cómo me fue en octubre por categoría?", "¿Cuánto gasté en Supermercado Ejemplo este año?", "¿Qué gastos fijos faltan por pagar?"
-
-### Excel de gastos fijos
-
-Opcional. Crea un `.xlsx` con la primera hoja así (encabezados en la fila 1, sin importar mayúsculas):
-
-| nombre | monto | comercio |
-|---|---:|---|
-| Arriendo | 1200000 | nombre del arrendador |
-| Internet | 150000 | proveedor |
-
-`comercio` es la palabra clave para detectar el pago entre tus movimientos (palabras completas, sin distinguir acentos ni mayúsculas; si está vacío se usa `nombre`). Los bancos cortan los nombres largos, así que una palabra clave que termine en `*` también acepta la última palabra cortada (`compania de med*`). Luego pídele a Claude que lo importe desde la ruta del archivo. Importar reemplaza la lista anterior.
+El cruce es conservador a propósito: solo cambia un movimiento cuando hay exactamente uno que es el más cercano, y nunca toca un movimiento de otro comercio u otro monto. Otros proveedores que encajan en el mismo patrón: tiendas de aplicaciones, apps de transporte y domicilios, servicios públicos, cualquier servicio que mande un recibo por correo. Mira [docs/learn-a-bank.es.md](docs/learn-a-bank.es.md).
 
 ## Herramientas (25)
 
-Los nombres de las herramientas están en español.
+<details>
+<summary>Ver todas las herramientas</summary>
 
 | Herramienta | Qué hace |
 |---|---|
-| `registrar_movimiento` | Guarda un movimiento interpretado (`sourceId` = id del correo evita duplicados). |
-| `registrar_movimientos` | Guarda hasta 100 movimientos por lote; cada ítem se valida por separado. |
-| `consultar_movimientos` | Filtra y agrupa movimientos (totales por categoría, banco, comercio, día o mes). |
-| `clasificar_comercio` | Asigna categoría a un comercio y reclasifica todos sus gastos. |
-| `fijar_presupuesto` | Define el presupuesto de una categoría para un mes (o `default`). |
-| `estado_presupuesto` | Gastado vs presupuesto por categoría, alerta al 80% y gasto sin categoría. |
-| `importar_gastos_fijos` | Carga la lista de gastos fijos desde un Excel. |
-| `gastos_fijos_pendientes` | Gastos fijos de un mes: pagados y por pagar. |
-| `ultimo_movimiento_registrado` | Fecha más reciente por banco, para saber desde dónde sincronizar. |
-| `listar_remitentes` | Remitentes bancarios autorizados y la consulta de Gmail (`from:(a OR b)`). |
-| `agregar_remitente` | Agrega un remitente (se guarda en minúsculas; debe contener `@`). |
-| `quitar_remitente` | Quita un remitente. |
-| `filtrar_no_registrados` | De una lista de ids de mensajes (máx. 500) devuelve los aún no registrados. |
-| `conectar_gmail` | Conecta Gmail (solo lectura) con un clic de Permitir, una sola vez. |
-| `estado_gmail` | Si Gmail está configurado, conectado o esperando tu autorización. |
-| `desconectar_gmail` | Borra el token de Gmail guardado en este computador. |
-| `sincronizar_gmail` | Descarga y procesa los correos del banco de un rango de fechas y registra los movimientos; devuelve un resumen. |
-| `clasificar_comercios` | Clasifica varios comercios de una vez y reclasifica sus gastos. |
-| `gastos_recurrentes_no_listados` | Suscripciones y gastos fijos del mes que no están en tu lista de gastos fijos: encuentra los que olvidaste. |
-| `formatos_banco` | Qué bancos sabe leer el servidor (incluidos y aprendidos) y qué remitentes autorizados todavía necesitan reglas. |
-| `configurar_formato_banco` | Enseña al servidor un banco nuevo con 3 o 4 comprobantes confirmados; se guarda solo si todos pasan. |
-| `eliminar_formato_banco` | Borra las reglas aprendidas de un remitente. |
-| `ver_panel` | Muestra el reporte interactivo dentro de la conversación; `resaltar` marca los movimientos que buscas (un concepto de gastos fijos, un nombre, un monto o una categoría). |
-| `datos_panel` | Herramienta privada con la que el reporte pide sus propios datos; el modelo no la ve, así que los movimientos no entran a su contexto. |
-| `abrir_panel` | Abre en tu navegador el panel interactivo de gastos (local, solo lectura). |
+| `ver_panel` | Muestra el reporte interactivo dentro de la conversación; `resaltar` marca los movimientos que buscas (un concepto de gasto fijo, un nombre, un monto o una categoría). |
+| `datos_panel` | Herramienta privada con la que el reporte pide sus datos; el modelo nunca la ve. |
+| `abrir_panel` | Abre el mismo panel en una ventana del navegador (local, solo lectura). |
+| `registrar_movimiento` / `registrar_movimientos` | Guarda un movimiento, o hasta 100 por lote; `sourceId` (el id del correo) evita duplicados. |
+| `consultar_movimientos` | Filtra y agrupa movimientos (por categoría, banco, comercio, día o mes). |
+| `clasificar_comercio` / `clasificar_comercios` | Asigna una categoría a un comercio, o a muchos a la vez, y reclasifica sus gastos. |
+| `fijar_presupuesto` / `estado_presupuesto` | Fija un presupuesto; gastado contra presupuesto por categoría, con alerta al 80%. |
+| `importar_gastos_fijos` / `gastos_fijos_pendientes` | Carga la lista de gastos fijos; qué se pagó y qué falta. |
+| `gastos_recurrentes_no_listados` | Suscripciones y cobros fijos que pagas y no están en tu lista. |
+| `ultimo_movimiento_registrado` | Fecha del último movimiento por banco. |
+| `listar_remitentes` / `agregar_remitente` / `quitar_remitente` | Administra los remitentes autorizados. |
+| `filtrar_no_registrados` | De una lista de ids de correo, los que todavía no están registrados. |
+| `conectar_gmail` / `estado_gmail` / `desconectar_gmail` | Conecta Gmail (solo lectura), lo consulta, o borra el token local. |
+| `sincronizar_gmail` | Descarga y lee los correos de un rango de fechas; devuelve un resumen. |
+| `formatos_banco` | Qué bancos y proveedores se pueden leer (incluidos y aprendidos) y qué remitentes todavía necesitan reglas. |
+| `configurar_formato_banco` / `eliminar_formato_banco` | Aprende un banco o proveedor desde ejemplos confirmados (se guarda solo si todos pasan), o borra sus reglas. |
 
-## Solución de problemas
+</details>
 
-- **"node:sqlite" no se encuentra / el servidor se cierra al iniciar:** tu Node es anterior a 22.13. Ejecuta `node --version` y actualiza. Con un cliente gráfico, el Node que lanza puede ser distinto al de tu terminal; usa la opción de ruta completa de la instalación C.
-- **No aparecen las herramientas:** reinicia el cliente tras agregar el servidor. En Claude Code ejecuta `claude mcp list` y confirma que `gastos` está conectado.
-- **`npx` tarda la primera vez:** descarga el paquete una vez y luego lo deja en caché.
-- **Los datos no están donde espero:** revisa `GASTOS_DB` en el entorno del servidor; sin ella el archivo es `~/.gastos-mcp/gastos.db`.
-- **Un movimiento quedó mal leído:** todavía no hay herramienta para editar o borrar (ver Limitaciones).
+## Privacidad y seguridad
 
-## Limitaciones
+- **Local primero.** Un solo archivo SQLite en tu computador. El único tráfico de red es hacia las APIs de Google cuando conectas Gmail y, solo si un recibo en dólares necesita convertirse, una consulta al servicio de datos abiertos del gobierno colombiano por la tasa oficial de ese día (lleva una fecha, nada más).
+- **Gmail de solo lectura** (`gmail.readonly`), solo para los remitentes que autorizas, solo para extraer datos de movimientos. El token vive en `~/.gastos-mcp/gmail-token.json` (permisos solo para el dueño); `desconectar_gmail` lo borra y puedes revocar el permiso en <https://myaccount.google.com/permissions>.
+- **Solo se guardan datos extraídos**: fecha, monto, comercio, banco, tipo y categoría, más una descripción corta del producto cuando un recibo lo nombra; nunca el texto de un correo.
+- **El reporte no alimenta al modelo.** Sus datos llegan por una herramienta que el modelo no puede llamar, así que los movimientos quedan fuera del contexto de la conversación; el modelo recibe un resumen corto.
+- **Refuerzo del panel en navegador:** solo `127.0.0.1`, token secreto en el fragmento de la URL, otros encabezados `Host` rechazados, CSP con nonce, solo lectura, nada se carga de internet.
+- **La entrada no confiable se trata como tal:** el texto de los correos tiene tope de tamaño, los parsers evitan expresiones regulares propensas al retroceso, las expresiones aprendidas corren en un contexto aislado con límite de 150 ms, y los valores tomados de los correos se limpian antes de llegar al modelo.
+- Cuando Claude lee tus correos o consulta tus datos, ese contenido se procesa bajo los términos de privacidad de tu cliente de Claude.
 
-- Todavía no hay herramienta para editar o borrar un movimiento.
-- La sincronización con Gmail usa una app de Google incluida en el paquete (el mantenedor la configura una sola vez, ver [docs/gmail-setup.es.md](docs/gmail-setup.es.md)). Hasta que Google la verifique, muestra una pantalla de "app no verificada" y permite 100 usuarios en total. Se probó con respuestas de Google simuladas y con formatos reales de correos de BBVA, pero todavía no de punta a punta contra los servidores de Google.
-- BBVA Colombia viene incluido. **Cualquier otro banco se aprende con 3 o 4 avisos tuyos** (ver [docs/learn-a-bank.es.md](docs/learn-a-bank.es.md)): Claude redacta las reglas de lectura, el servidor las prueba contra los ejemplos que confirmaste y las guarda en tu base de datos. Probado con ejemplos inventados de Argentina y México, todavía no con correos reales de esos bancos. Una moneda por base de datos.
-- Los impuestos y cargos bancarios que ningún correo trae (4x1000, IVA, comisiones, cuotas de manejo) no se reflejan; el panel lo aclara al pie del gráfico, así que los totales pueden diferir del extracto del banco.
-- Las transferencias en moneda extranjera distintas de una conversión USD a COP no se registran solas; se reportan para tu revisión.
-- El servidor confía en la dirección `From` que reporta Gmail y se apoya en la protección anti-suplantación de Gmail; todavía no verifica DKIM por su cuenta. El texto tomado de los correos (comercio, asunto) se limpia y se acota antes de llegar al modelo, pero trátalo como datos.
-- Los montos son solo COP enteros.
+## Notas de ingeniería
 
-Ideas para una segunda fase: editar y borrar movimientos, reglas de comprobantes para más bancos, más monedas.
+- **MCP de punta a punta.** 25 herramientas por stdio, más una MCP App (recurso `ui://`) con una herramienta de datos privada solo para la app.
+- **Reglas como datos, no como código.** Un perfil validado con esquema por remitente (etiquetas, expresiones regulares, valores fijos, formatos de fecha, moneda, zona horaria), probado contra ejemplos antes de guardarse.
+- **Sincronización idempotente y reanudable.** Los correos ya procesados o descartados no se vuelven a descargar; los rangos grandes continúan donde quedaron.
+- **Probado.** 316 pruebas unitarias y de integración (parsers con entradas hostiles, OAuth con un Google simulado, el protocolo MCP en memoria, guardas de CSP), TypeScript con verificación de tipos, y una prueba de empaquetado que instala el tarball y habla con él por stdio.
+- **Revisado.** El código de Gmail y de lectura pasó por una revisión de seguridad cuyos hallazgos (ReDoS, correos envenenados, manejo del token, validación del remitente) se corrigieron y se cubrieron con pruebas.
 
-## Estado y desarrollo
+## Limitaciones y hoja de ruta
 
-Versión previa (0.1.0). Aún no publicado en npm.
+- La sincronización de Gmail desde el servidor necesita un cliente OAuth de Google; mientras Google no verifique la app muestra una pantalla de "app no verificada" y permite 100 usuarios en total. Está cubierta por pruebas con un Google simulado y el mantenedor la ejecutó de punta a punta contra un buzón real (avisos de BBVA, recibos de Apple y de Anthropic). Mientras la app no esté publicada, Google vence el permiso cada 7 días.
+- Los impuestos y cargos del banco que ningún correo trae (4x1000, IVA, comisiones, cuotas de manejo) no se reflejan; el reporte lo aclara al pie del gráfico.
+- Todavía no hay una herramienta para editar o borrar un movimiento; las reversiones de compras todavía no están modeladas.
+- Una moneda por base de datos (COP). Solo el USD tiene una fuente de tasa de cambio (la tasa oficial colombiana); otras monedas extranjeras se reportan para revisión en lugar de registrarse.
+- Claude solo puede manejar el reporte cuando lo abre; mover desde la conversación un reporte ya abierto requiere un conector remoto (planeado).
+- El servidor confía en la dirección `From` que informa Gmail y todavía no verifica DKIM por su cuenta.
+- Los recibos de proveedores solo se leen cuando el servidor lee Gmail por su cuenta; por el conector de Gmail de Claude, el asistente tendría que registrarlos a mano.
+- Hoja de ruta: más proveedores incluidos, una revisión que marque un cobro del banco sin recibo que le corresponda, un conector remoto (se agrega por URL, funciona en web y celular), editar y borrar movimientos, reversiones, más bancos y monedas.
+
+## Desarrollo
 
 ```bash
 npm install
-npm test            # pruebas unitarias
+npm test             # 316 pruebas
 npm run typecheck
 npm run build
-npm run smoke:pack  # npm pack, instala el tarball en un temporal, verifica 25 herramientas por stdio
-npm run build:mcpb  # opcional: genera build/expenditures-control.mcpb
+npm run smoke:pack   # empaqueta, instala el tarball en una carpeta temporal y revisa las 25 herramientas por stdio
+npm run build:mcpb   # genera build/expenditures-control.mcpb
+npm run panel:demo   # abre el reporte con datos inventados (compila primero)
 ```
 
-Repositorio: https://github.com/estebanjc78/expenditures-control
+Solución de problemas: si no se encuentra `node:sqlite`, tu Node es anterior a 22.13 (un cliente con interfaz puede lanzar un Node distinto al de tu terminal); si las herramientas no aparecen, reinicia el cliente; los datos viven en `GASTOS_DB` o en `~/.gastos-mcp/gastos.db` (haz una copia del archivo y de sus vecinos `-wal`/`-shm` con el cliente cerrado).
 
 ## Licencia
 

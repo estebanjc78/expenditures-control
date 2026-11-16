@@ -12,6 +12,7 @@ A local-first MCP server that reads the notification emails your bank already se
 Every purchase and transfer triggers an email from your bank. That is the one data source that works with any bank, needs no bank API or credentials, and is already in your inbox. This project turns those emails into structured data you own, then lets you explore it by talking to Claude **or** by clicking around a report that lives in the chat.
 
 - **Any bank, any country.** BBVA Colombia is built in. For any other bank you show Claude 3 or 4 real notices and it learns the reading rules, which the server tests against your examples before saving them.
+- **Banks plus external sources.** The bank says `Apple.com/bill` and nothing else; the receipt from the provider says which app. Receipts from shops and services are read the same way as bank notices and cross-checked with what the bank reported.
 - **A report you can play with.** Click a category, a merchant or a day and every chart, ranking and the table highlight the same selection.
 - **Ask in plain language.** "I can't find the rent transfer" opens the report on the right month with that movement highlighted.
 - **Local-first.** Your data lives in one SQLite file on your machine. No cloud, no account.
@@ -48,11 +49,18 @@ flowchart LR
     C <-->|"MCP tools"| S[expenditures-control]
     S <--> DB[(Local SQLite file)]
     S <-->|"read-only, OAuth"| G[Gmail API]
-    G --- M[Bank notification emails]
-    S --> P["Reading rules per bank: built-in or learned"]
+    G --- B[Bank notices]
+    G --- V["Provider receipts: Apple, a service billed in dollars..."]
+    S --> P["Reading rules per sender: built-in or learned"]
+    B --> P
+    V --> P
+    P --> X{"Cross-check bank and provider"}
+    X -->|"the receipt names a generic charge"| DB
+    X -->|"a charge the bank never reported"| DB
+    X -->|"the bank already reported it"| O["Counted once"]
     S -->|"private data tool"| R["Interactive report (MCP App)"]
     R --> U
-    C -. "optional: Claude's own Gmail connector" .-> M
+    C -. "optional: Claude's own Gmail connector" .-> B
 ```
 
 The server has no language model. Claude does what needs judgment (classifying merchants, explaining, learning a new bank from examples); the server validates, stores, aggregates and extracts. The full flow is in [docs/diagrama-proceso-mcp.md](docs/diagrama-proceso-mcp.md) (in Spanish).
@@ -90,11 +98,25 @@ Set `GASTOS_DB=/path/to/gastos.db` in the server's environment to choose where t
 
 Fixed-expenses spreadsheet: first sheet with headers `nombre`, `monto`, `comercio` (the keyword used to detect the payment: whole words, accents and case ignored; a trailing `*` also matches a truncated last word, like `compania de med*`). Importing replaces the previous list.
 
-## Banks
+## Banks and providers
+
+### Banks
 
 BBVA Colombia is built in: purchases, received money (Bre-B and transfers), own transfers, transfers to people, PSE payments, bill payments and credit-card payments.
 
 For any other bank, **teach it from examples**: add the sender, ask Claude to learn that bank, confirm how it reads 3 or 4 of your real notices, and the rules are stored in your database. Details, the rules format and the safety model: [docs/learn-a-bank.md](docs/learn-a-bank.md). It is tested with made-up Argentine and Mexican examples, not yet with real mails of those banks.
+
+### Providers (receipts from shops and services)
+
+A provider is any sender whose emails say more about your money than the bank does. It is taught from examples exactly like a bank, and each receipt template does one of three jobs:
+
+| Job | Example | What happens |
+|---|---|---|
+| **Enrich** | The bank reports `Apple.com/bill` $24,000; Apple's receipt says "Plan Individual de una app de música" | The movement with that amount and date (up to 3 days apart) gets the product name; its merchant and category do not change. If nothing fits yet, the receipt waits for the next sync, and is dropped after 30 days. |
+| **Complete** | A service bills a card your bank does not report, in dollars | The receipt is registered in pesos with that day's official rate, marked as an estimate. Without a rate it goes to review. |
+| **Avoid double counting** | The bank already reported that same dollar charge | The receipt is skipped. |
+
+The cross-check is deliberately conservative: it only changes a movement when exactly one is the closest match, and never touches a movement of another merchant or amount. Other providers that fit the same pattern: app stores, ride-hailing and delivery apps, utilities, any service that emails a receipt. See [docs/learn-a-bank.md](docs/learn-a-bank.md).
 
 ## Tools (25)
 
@@ -128,7 +150,7 @@ Tool names are in Spanish.
 
 - **Local-first.** One SQLite file on your computer. The only network traffic is to Google's APIs when you connect Gmail, plus, only if a receipt in dollars needs converting, a request to the Colombian government's open data service for that day's official exchange rate (it carries a date, nothing else).
 - **Read-only Gmail** (`gmail.readonly`), only for the senders you authorize, only to extract movement data. The token lives in `~/.gastos-mcp/gmail-token.json` (owner-only permissions); `desconectar_gmail` deletes it and you can revoke the permission at <https://myaccount.google.com/permissions>.
-- **Only extracted data is stored**: date, amount, merchant, bank, kind and category, never the text of an email.
+- **Only extracted data is stored**: date, amount, merchant, bank, kind and category, plus a short product description when a receipt names one; never the text of an email.
 - **The report does not feed the model.** Its data comes through a tool the model cannot call, so movements stay out of the conversation context; the model receives a short summary.
 - **Browser fallback hardening:** `127.0.0.1` only, secret token in the URL fragment, other `Host` headers refused, nonce-based CSP, read-only, nothing loaded from the internet.
 - **Untrusted input is treated as such:** mail text is size-capped, parsers avoid backtracking-prone regexes, learned regexes run in an isolated context with a 150 ms limit, and values taken from emails are cleaned before reaching the model.
@@ -144,13 +166,14 @@ Tool names are in Spanish.
 
 ## Limitations and roadmap
 
-- Gmail sync from the server needs a Google OAuth client; until Google verifies the app it shows an "unverified app" screen and allows 100 users in total. It is covered by tests with a simulated Google, not yet run end to end against Google's servers by the maintainer.
+- Gmail sync from the server needs a Google OAuth client; until Google verifies the app it shows an "unverified app" screen and allows 100 users in total. It is covered by tests with a simulated Google and has been run end to end by the maintainer against a real mailbox (BBVA notices, Apple and Anthropic receipts). Until the app is published, Google expires the permission every 7 days.
 - Bank taxes and fees that no email carries (4x1000, VAT, commissions, card maintenance fees) are not reflected; the report says so under its chart.
 - No tool to edit or delete a movement yet; purchase reversals are not modeled yet.
-- One currency per database. Foreign-currency transfers other than USD-to-COP conversions are reported for review instead of being registered.
+- One currency per database (COP). Only USD has an exchange-rate source (the official Colombian rate); other foreign currencies are reported for review instead of being registered.
 - The report can be driven by Claude only when it is opened; moving an already-open report from the conversation needs a remote connector (planned).
 - The server trusts the `From` address Gmail reports and does not verify DKIM itself yet.
-- Roadmap: a remote connector (add by URL, works on web and mobile), editing and deleting movements, reversals, more banks and currencies.
+- Provider receipts are read only when the server reads Gmail itself; through Claude's own Gmail connector the assistant would have to register them by hand.
+- Roadmap: more providers out of the box, a check that flags a bank charge with no matching receipt, a remote connector (add by URL, works on web and mobile), editing and deleting movements, reversals, more banks and currencies.
 
 ## Development
 

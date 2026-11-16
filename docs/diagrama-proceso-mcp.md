@@ -1,8 +1,8 @@
 # Diagrama de proceso: MCP de gastos
 
-Flujo de una solicitud desde el asistente hasta la base SQLite local y de vuelta. El servidor no tiene modelo de lenguaje. Los correos del banco se pueden leer por dos caminos y los dos terminan en la misma base. Claude clasifica los comercios y responde las preguntas, y el reporte se ve dentro de la conversación.
+Flujo de una solicitud desde el asistente hasta la base SQLite local y de vuelta. El servidor no tiene modelo de lenguaje. Los correos de dos tipos de fuentes, los **bancos** (dicen qué se movió) y los **proveedores** (recibos de tiendas y servicios, que explican o completan lo que dijo el banco), se pueden leer por dos caminos y los dos terminan en la misma base. Claude clasifica los comercios y responde las preguntas, y el reporte se ve dentro de la conversación.
 
-- **Camino A, Gmail conectado al servidor:** el servidor lee Gmail por su cuenta (solo lectura, con el permiso que el usuario da una vez), extrae los datos con reglas por banco y le devuelve a Claude solo un resumen. Sirve para cargar meses de historial.
+- **Camino A, Gmail conectado al servidor:** el servidor lee Gmail por su cuenta (solo lectura, con el permiso que el usuario da una vez), extrae los datos con reglas por remitente y le devuelve a Claude solo un resumen. Sirve para cargar meses de historial.
 - **Camino B, conector de Gmail de Claude:** no requiere configurar nada. Claude lee los correos recientes y le entrega al servidor los datos ya extraídos. Sirve para el uso diario.
 - **Reporte:** una MCP App que Claude dibuja dentro del chat. Pide sus datos con una herramienta privada, así los movimientos no entran al contexto del modelo.
 
@@ -21,22 +21,26 @@ flowchart TD
     A2 --> V{"¿Argumentos válidos y Gmail conectado?"}
     V -->|"No"| E["Generar error claro"]
     E --> C
-    V -->|"Sí"| G["API de Gmail: correos de los remitentes autorizados"]
-    G -->|"Solo los correos aún no procesados"| P["Parser por banco: reglas sobre el texto del aviso"]
+    V -->|"Sí"| G["API de Gmail: correos de los remitentes autorizados, bancos y proveedores"]
+    G -->|"Solo los correos aún no procesados"| P["Reglas por remitente sobre el texto del aviso"]
     P --> N{"¿El remitente tiene reglas?"}
-    N -->|"No: banco nuevo"| L["Claude pide 3 o 4 comprobantes, el usuario los confirma, el servidor prueba las reglas contra ellos y las guarda"]
+    N -->|"No: banco o proveedor nuevo"| L["Claude pide 3 o 4 comprobantes, el usuario los confirma, el servidor prueba las reglas contra ellos y las guarda"]
     L --> P
     N -->|"Sí: incluidas o aprendidas"| K{"¿Qué es el aviso?"}
-    K -->|"Rechazado o duplicado"| X["Se omite y se recuerda"]
-    K -->|"Importe en otra moneda sin valor en pesos"| R["Si la regla lo permite se pasa a pesos con la TRM del día y se marca estimado; si no, se reporta para revisión"]
-    R -->|"Convertido, y el banco no avisó ese cobro"| T
-    K -->|"Recibo que explica un cobro genérico, por ejemplo Apple.com/bill"| Q["Se escribe el producto en el movimiento del banco con el mismo monto y fecha"]
-    Q --> DB
+    K -->|"Rechazado, sin interés o duplicado"| X["Se omite y se recuerda"]
     K -->|"Formato desconocido"| Y["Se lista como no reconocido"]
-    K -->|"Movimiento"| T["Se guarda como gasto, ingreso o entre cuentas: USD a COP es ingreso y el pago de tarjeta es entre cuentas. PSE y transferencias a personas reciben su categoría solas"]
+    K -->|"Aviso del banco: un movimiento"| T["Se guarda como gasto, ingreso o entre cuentas: USD a COP es ingreso y el pago de tarjeta es entre cuentas. PSE y transferencias a personas reciben su categoría solas"]
+    K -->|"Recibo de un proveedor: tienda, servicio"| M{"Cruce banco y proveedor"}
+    M -->|"Nombra un cobro genérico que el banco ya avisó, por ejemplo Apple.com/bill"| Q["Se escribe el producto en ese movimiento: mismo monto y fecha con hasta 3 días de diferencia"]
+    M -->|"Cobro en dólares que el banco nunca avisó"| R["Se pasa a pesos con la TRM del día y se marca estimado; sin tasa, va a revisión"]
+    M -->|"El banco ya avisó ese mismo cobro"| X2["Se omite: no se cuenta dos veces"]
+    M -->|"Todavía no hay aviso del banco"| WT["Espera: se reintenta en la próxima sincronización y se abandona a los 30 días"]
+    R --> T
+    Q --> DB
     T --> DB[("SQLite local")]
-    X --> F["Resumen: registrados, omitidos, para revisar, comercios sin categoría"]
-    R --> F
+    X --> F["Resumen: registrados, enriquecidos, convertidos, omitidos, para revisar, comercios sin categoría"]
+    X2 --> F
+    WT --> F
     Y --> F
     DB --> F
     F --> C
@@ -76,5 +80,8 @@ flowchart TD
 10. **Reporte.** `ver_panel` muestra dentro del chat un reporte interactivo: el gasto del mes, el ritmo contra el mes anterior, categorías que se expanden, un gráfico por día y una tabla con búsqueda. El reporte pide sus datos con `datos_panel`, una herramienta que el modelo no ve, y Claude solo recibe un resumen corto.
 11. **Resaltado.** Si el usuario dice "no encuentro la transferencia del alquiler", Claude llama a `ver_panel` con `resaltar`. El servidor entiende "alquiler" como un concepto de la lista de gastos fijos (o un nombre, un monto o una categoría), busca el movimiento en cualquier mes y el reporte se abre en el mes correcto con la fila resaltada.
 12. Si el cliente no soporta MCP Apps, `abrir_panel` abre el mismo panel en el navegador. Solo escucha en `127.0.0.1`, exige un token secreto y es de solo lectura.
-13. **Recibos.** Un remitente que no es banco (una tienda de aplicaciones, un servicio en dólares) se aprende igual. Si su recibo solo explica un cobro que el banco ya avisó con un nombre genérico, el producto se escribe en ese movimiento (mismo monto, fecha con hasta 3 días de diferencia). Si es un cobro en dólares que el banco nunca avisa, se registra en pesos con la TRM del día y queda marcado como estimado; si el aviso del banco ya existía, no se cuenta dos veces.
+13. **Fuentes externas y cruce banco-proveedor.** Un proveedor (una tienda de aplicaciones, un servicio en dólares, lo que sea que mande recibos) se aprende igual que un banco, con 3 o 4 ejemplos confirmados; si manda un solo tipo de aviso, alcanza con 1. Cada plantilla de recibo hace una de tres cosas:
+    - **Enriquecer:** el banco avisó `Apple.com/bill` por $24.000 y el recibo dice "Plan Individual de una app de música"; el producto se escribe en el movimiento del mismo monto y fecha (hasta 3 días de diferencia). El comercio y la categoría no cambian. Si hay dos candidatos igual de cercanos no se toca nada. Si todavía no hay aviso del banco, el recibo espera a la próxima sincronización y se abandona a los 30 días para no gastar cuota de Gmail.
+    - **Completar:** un cobro en dólares que el banco nunca avisa se registra en pesos con la TRM del día (solo se envía una fecha a datos.gov.co) y queda marcado como estimado.
+    - **No duplicar:** si el banco ya avisó ese mismo cobro (mismo comercio, pocos días, monto parecido), el recibo se omite.
 14. Los totales no incluyen impuestos ni cargos bancarios (4x1000, IVA, comisiones, cuotas de manejo), que ningún correo trae y solo aparecen en el extracto; el reporte lo aclara al pie del gráfico.
