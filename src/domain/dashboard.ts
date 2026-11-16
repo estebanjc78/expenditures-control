@@ -28,6 +28,7 @@ export interface DashboardMovement {
   readonly kind: Kind;
   readonly amount: number;
   readonly category: Category | null;
+  readonly detail: string | null;
 }
 
 export interface DashboardData {
@@ -142,7 +143,7 @@ function movements(db: DatabaseSync, scope: Scope): { rows: DashboardMovement[];
   const w = where(scope);
   const rows = db
     .prepare(
-      `SELECT id, date, merchant, bank, kind, amount, category FROM movements WHERE ${w.sql}
+      `SELECT id, date, merchant, bank, kind, amount, category, detail FROM movements WHERE ${w.sql}
        ORDER BY date DESC, id DESC LIMIT ${MAX_MOVEMENTS + 1}`,
     )
     .all(...w.params) as unknown as DashboardMovement[];

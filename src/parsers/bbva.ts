@@ -130,6 +130,7 @@ function parseCardPayment(text: string): ParseResult | null {
 /** Parser for BBVA Colombia transaction notices (purchase, received money, transfers). */
 export function parseBbva({ subject, text, receivedAt }: ParserInput): ParseResult {
   if (/no exitosa|rechazad/i.test(subject)) return { status: "skip", reason: "Operación no exitosa o rechazada" };
+  if (/confirmaci[oó]n de ingreso/i.test(subject)) return { status: "skip", reason: "Aviso de ingreso a los canales digitales: no es un movimiento" };
   if (/est[aá] en proceso/i.test(subject)) {
     return { status: "skip", reason: "Aviso 'en proceso': la transferencia se registra con el aviso 'va en camino'" };
   }

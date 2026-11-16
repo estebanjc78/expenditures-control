@@ -87,6 +87,7 @@ interface Row {
   bank: string;
   kind: Movement["kind"];
   category: Movement["category"];
+  detail: string | null;
 }
 
 function toMovement(r: Row): Movement {
@@ -99,6 +100,7 @@ function toMovement(r: Row): Movement {
     bank: r.bank,
     kind: r.kind,
     category: r.category,
+    detail: r.detail ?? null,
   };
 }
 

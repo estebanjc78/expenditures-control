@@ -33,6 +33,7 @@ Every purchase and transfer triggers an email from your bank. That is the one da
 - **Interactive report as an MCP App**, rendered inside Claude (and Claude Desktop). The model only receives a short summary: the report fetches its own data through a private tool, so your movements never enter the model's context.
 - **Learned bank formats.** Declarative, schema-validated rules per sender, tested against confirmed examples, stored in your database. Learned rules take priority over built-in ones, so a bank can be re-taught when its emails change.
 - **Gmail sync from the server.** Read-only OAuth (PKCE, loopback), token kept locally. Months of history load in seconds without passing through the model.
+- **Receipts that complete the picture.** A receipt can name what a generic card charge was for (the bank says `Apple.com/bill`, the receipt says which app), matched by amount and date, and a receipt in dollars from a shop your bank never reports is converted at that day's official rate and marked as an estimate, without ever counting a charge twice.
 - **Fixed expenses and forgotten subscriptions.** Import a spreadsheet of what you expect to pay; the server tells you what was paid, what is still due and what you pay without tracking. PSE payments, which hide the payee, are matched by amount.
 - **Sensible accounting.** USD-to-COP conversions count as income, credit-card payments are own transfers (no double counting), PSE and transfers to people get their own categories.
 - **Safe by construction.** Strict CSP, secret token and `127.0.0.1` only for the browser fallback; regexes proposed by a model run in an isolated context with a time limit; text taken from emails is cleaned and length-limited.
@@ -125,7 +126,7 @@ Tool names are in Spanish.
 
 ## Privacy and security
 
-- **Local-first.** One SQLite file on your computer. The only network traffic is to Google's APIs when you connect Gmail.
+- **Local-first.** One SQLite file on your computer. The only network traffic is to Google's APIs when you connect Gmail, plus, only if a receipt in dollars needs converting, a request to the Colombian government's open data service for that day's official exchange rate (it carries a date, nothing else).
 - **Read-only Gmail** (`gmail.readonly`), only for the senders you authorize, only to extract movement data. The token lives in `~/.gastos-mcp/gmail-token.json` (owner-only permissions); `desconectar_gmail` deletes it and you can revoke the permission at <https://myaccount.google.com/permissions>.
 - **Only extracted data is stored**: date, amount, merchant, bank, kind and category, never the text of an email.
 - **The report does not feed the model.** Its data comes through a tool the model cannot call, so movements stay out of the conversation context; the model receives a short summary.
@@ -138,7 +139,7 @@ Tool names are in Spanish.
 - **MCP end to end.** 25 tools over stdio, plus an MCP App (`ui://` resource) with a private app-only data tool.
 - **Rules as data, not code.** A schema-validated profile per sender (labels, regexes, fixed values, date formats, currency, time zone), tested against examples before being saved.
 - **Idempotent, resumable sync.** Mails already processed or discarded are never downloaded again; large ranges resume where they stopped.
-- **Tested.** 289 unit and integration tests (parsers with hostile inputs, OAuth with a simulated Google, the MCP protocol in memory, CSP guards), type-checked TypeScript, and a packaging smoke test that installs the tarball and talks to it over stdio.
+- **Tested.** 316 unit and integration tests (parsers with hostile inputs, OAuth with a simulated Google, the MCP protocol in memory, CSP guards), type-checked TypeScript, and a packaging smoke test that installs the tarball and talks to it over stdio.
 - **Reviewed.** The Gmail and parsing code went through a security review whose findings (ReDoS, poison mails, token handling, sender validation) were fixed and covered by tests.
 
 ## Limitations and roadmap
@@ -155,7 +156,7 @@ Tool names are in Spanish.
 
 ```bash
 npm install
-npm test             # 289 tests
+npm test             # 316 tests
 npm run typecheck
 npm run build
 npm run smoke:pack   # packs, installs the tarball in a temp dir, checks the 25 tools over stdio

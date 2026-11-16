@@ -3,9 +3,13 @@ import type { MailMessage, MailSource } from "../gmail/source.js";
 import { senderAddress } from "../parsers/index.js";
 import { cleanText } from "./sanitize.js";
 import { resolveParser } from "../parsers/resolve.js";
-import type { ParseResult } from "../parsers/types.js";
+import type { ForeignMovement, MovementDetail, ParseResult } from "../parsers/types.js";
 import { addMovements, filterUnregistered, MAX_BATCH } from "./batch.js";
+import { trmRateProvider } from "./fx.js";
+import type { RateProvider } from "./fx.js";
 import { gmailSenderQuery, listSenders } from "./senders.js";
+import { applyDetails, convertForeign } from "./sync-extras.js";
+import type { Pending } from "./sync-extras.js";
 import type { MovementInput } from "./types.js";
 
 export const DEFAULT_MAX_MESSAGES = 150;
@@ -23,6 +27,10 @@ export interface SyncOptions {
   readonly until?: string;
   /** Mails processed per call; run again if `remaining` > 0. */
   readonly maxMessages?: number;
+  /** Exchange rates for receipts in another currency; defaults to the official Colombian rate (USD). */
+  readonly rates?: RateProvider;
+  /** Today's date (YYYY-MM-DD); only tests set it. */
+  readonly today?: string;
 }
 
 export interface UncategorizedMerchant {
@@ -44,6 +52,12 @@ export interface SyncSummary {
   /** Senders with no reading rules yet: the assistant must learn their format from a few example notices. */
   readonly needsFormat: readonly { sender: string; count: number; subjects: readonly string[] }[];
   readonly failed: readonly { id: string; error: string }[];
+  /** Receipts in another currency registered at that day's official rate (marked as estimates). */
+  readonly converted: number;
+  /** Movements that now say what they were for, thanks to a receipt. */
+  readonly enriched: number;
+  /** Receipts with no single movement to describe yet; they are read again next sync. */
+  readonly detailsWaiting: number;
   readonly remaining: number;
   readonly uncategorizedMerchants: readonly UncategorizedMerchant[];
 }
@@ -118,6 +132,8 @@ interface Classified {
   readonly skipped: { id: string; subject: string }[];
   readonly review: { id: string; subject: string; reason: string }[];
   readonly unrecognized: { id: string; subject: string }[];
+  readonly foreign: Pending<ForeignMovement>[];
+  readonly details: Pending<MovementDetail>[];
 }
 
 function parseMessage(db: DatabaseSync, message: MailMessage): { bank: string | null; result: ParseResult } {
@@ -138,6 +154,8 @@ function classify(db: DatabaseSync, fetched: readonly Fetched[]): Classified & {
   const review: { id: string; subject: string; reason: string }[] = [];
   const unrecognized: { id: string; subject: string }[] = [];
   const failed: { id: string; error: string }[] = [];
+  const foreign: Pending<ForeignMovement>[] = [];
+  const details: Pending<MovementDetail>[] = [];
   for (const f of fetched) {
     if (!f.message) {
       failed.push({ id: f.id, error: cleanText(f.error ?? "unknown error", MAX_ERROR_CHARS) });
@@ -153,11 +171,13 @@ function classify(db: DatabaseSync, fetched: readonly Fetched[]): Classified & {
       noRules.set(sender, entry);
     }
     if (result.status === "movement" && bank) inputs.push({ sourceId: f.id, bank, ...result.movement });
+    else if (result.status === "foreign" && bank) foreign.push({ ...ref, bank, value: result.foreign });
+    else if (result.status === "detail" && bank) details.push({ ...ref, bank, value: result.detail });
     else if (result.status === "skip") skipped.push(ref);
     else if (result.status === "review") review.push({ ...ref, reason: result.reason });
     else unrecognized.push(ref);
   }
-  return { inputs, skipped, review, unrecognized, failed, needsFormat: [...noRules].map(([sender, v]) => ({ sender, count: v.count, subjects: v.subjects })) };
+  return { inputs, skipped, review, unrecognized, foreign, details, failed, needsFormat: [...noRules].map(([sender, v]) => ({ sender, count: v.count, subjects: v.subjects })) };
 }
 
 function register(db: DatabaseSync, inputs: readonly MovementInput[]) {
@@ -176,9 +196,9 @@ function register(db: DatabaseSync, inputs: readonly MovementInput[]) {
   return { registered, duplicates, failed };
 }
 
-function logSkipped(db: DatabaseSync, skipped: readonly { id: string; subject: string }[]): void {
-  const stmt = db.prepare("INSERT OR IGNORE INTO mail_log (message_id, outcome, subject) VALUES (?, 'skip', ?)");
-  for (const s of skipped) stmt.run(s.id, s.subject);
+function logMails(db: DatabaseSync, outcome: "skip" | "detail", mails: readonly { id: string; subject: string }[]): void {
+  const stmt = db.prepare("INSERT OR IGNORE INTO mail_log (message_id, outcome, subject) VALUES (?, ?, ?)");
+  for (const m of mails) stmt.run(m.id, outcome, m.subject);
 }
 
 /**
@@ -195,20 +215,28 @@ export async function syncMail(db: DatabaseSync, source: MailSource, options: Sy
 
   const c = classify(db, await fetchAll(source, batch));
   const saved = register(db, c.inputs);
-  logSkipped(db, c.skipped);
+  // After the bank's own notices are stored, so a receipt can tell they already reported the charge.
+  const converted = await convertForeign(db, c.foreign, options.rates ?? trmRateProvider(db));
+  const savedForeign = register(db, converted.inputs);
+  const described = applyDetails(db, c.details, options.today);
+  logMails(db, "skip", [...c.skipped, ...converted.duplicates, ...described.abandoned]);
+  logMails(db, "detail", described.applied);
 
   return {
     scanned: ids.length,
     alreadyKnown: ids.length - pending.length,
     processed: batch.length,
-    registered: saved.registered,
-    duplicates: saved.duplicates,
-    skipped: c.skipped.length,
-    review: c.review.slice(0, MAX_LISTED),
+    registered: saved.registered + savedForeign.registered,
+    duplicates: saved.duplicates + savedForeign.duplicates,
+    skipped: c.skipped.length + converted.duplicates.length,
+    review: [...c.review, ...converted.review].slice(0, MAX_LISTED),
     unrecognized: c.unrecognized.slice(0, MAX_LISTED),
     unrecognizedCount: c.unrecognized.length,
     needsFormat: c.needsFormat,
-    failed: [...c.failed, ...saved.failed].slice(0, MAX_LISTED),
+    failed: [...c.failed, ...saved.failed, ...savedForeign.failed].slice(0, MAX_LISTED),
+    converted: savedForeign.registered,
+    enriched: described.applied.length,
+    detailsWaiting: described.waiting,
     remaining: pending.length - batch.length,
     uncategorizedMerchants: uncategorizedMerchants(db),
   };

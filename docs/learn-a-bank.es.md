@@ -37,9 +37,17 @@ Las reglas son datos, no código. Un perfil por banco, con una plantilla por tip
 
 - Un valor se lee con `{"label": "Importe"}` (el texto después de esa etiqueta, hasta la siguiente), `{"regex": "por \\$ ([\\d.,]+)"}` (primer grupo de captura) o `{"fixed": "Transferencia propia"}`.
 - `delimiters` lista las demás etiquetas del aviso para que cada valor termine donde empieza el siguiente. `endMarkers` corta el pie legal.
-- Los montos aceptan `1.234,56` y `1,234.56`. Fechas: `YYYY-MM-DD`, `DD/MM/YYYY`, `MM/DD/YYYY`, `DD-MM-YYYY`, `DD.MM.YYYY`, `DD/MM/YY`, `YYYY/MM/DD` y meses con nombre (`5 nov 2026`, `12 de noviembre de 2026`).
-- Los montos en una moneda distinta a la del perfil se reportan para tu revisión y nunca se registran.
+- Los montos aceptan `1.234,56` y `1,234.56`. Fechas: `YYYY-MM-DD`, `DD/MM/YYYY`, `MM/DD/YYYY`, `DD-MM-YYYY`, `DD.MM.YYYY`, `DD/MM/YY`, `YYYY/MM/DD` y meses con nombre (`5 nov 2026`, `12 de noviembre de 2026`, `November 5, 2026`).
+- Los montos en una moneda distinta a la del perfil se reportan para tu revisión y nunca se registran, salvo que el perfil tenga `"foreignCurrency": "convert"` (ver más abajo).
 - Si un aviso no trae fecha propia, se usa la fecha del correo en la zona horaria del perfil.
+
+## Recibos que no son de un banco
+
+El mismo mecanismo lee recibos de comercios y servicios, en dos casos.
+
+**Un cobro en dólares que el banco nunca avisa.** Un comercio que cobra una tarjeta de otro banco manda un recibo en USD sin valor en pesos. Con `"currency": "USD"` y `"foreignCurrency": "convert"`, el recibo se registra en pesos con la tasa oficial de ese día (la TRM de Colombia, dato público; solo se envía una fecha) y queda marcado como "estimado" junto al monto original. Si el aviso de tu banco para ese mismo cobro ya existe (mismo comercio, pocos días de diferencia, monto parecido), el recibo se omite para no contarlo dos veces. Si no hay tasa, queda en revisión. Un remitente que solo manda un tipo de aviso (una sola plantilla) necesita 1 ejemplo confirmado en lugar de 3.
+
+**Un cobro genérico que un recibo explica.** El banco reporta un cobro de una tienda de aplicaciones como `Apple.com/bill` y nada más. Una plantilla con `"action": "detail"` y `"matchMerchant": ["apple.com/bill"]` lee el total, la fecha y el producto del recibo y, en lugar de crear un movimiento, escribe el nombre del producto en el movimiento que tiene el mismo monto y fecha (hasta 3 días de diferencia). El comercio y la categoría no cambian; el reporte muestra el producto debajo del comercio. Si ningún movimiento encaja de forma única, no se cambia nada y el recibo se vuelve a intentar en la próxima sincronización. Valores esperados en estos ejemplos: `{"detail": {"date", "amount", "description"}}`, y `{"date", "merchant", "kind", "foreign": {"currency", "value"}}` para recibos convertidos.
 
 ## Herramientas
 

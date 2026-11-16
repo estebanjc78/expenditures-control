@@ -105,6 +105,26 @@ describe("GmailApiSource errors", () => {
   });
 });
 
+describe("GmailApiSource per-minute quota", () => {
+  const quota = { status: 403, json: { error: { message: "Quota exceeded for quota metric 'Total Query Cost' and limit 'Units per minute per user'" } } };
+
+  it("waits and retries when Google answers 403 for the per-minute quota, then succeeds", async () => {
+    const waits: number[] = [];
+    let calls = 0;
+    const { fetchFn } = fakeFetch(() => (++calls < 3 ? quota : { json: { messages: [{ id: "a" }] } }));
+    const src = new GmailApiSource(async () => "t", { fetchFn, sleep: async (ms) => void waits.push(ms) });
+    expect(await src.listMessageIds("q", 5)).toEqual(["a"]);
+    expect(calls).toBe(3);
+    expect(waits.every((ms) => ms >= 10_000)).toBe(true);
+  });
+
+  it("gives up with a clear Spanish message that says nothing is lost", async () => {
+    const { fetchFn } = fakeFetch(() => quota);
+    const src = new GmailApiSource(async () => "t", { fetchFn, sleep: async () => undefined });
+    await expect(src.listMessageIds("q", 5)).rejects.toThrow(/límite de lecturas por minuto.*espera un minuto/is);
+  });
+});
+
 describe("GmailApiSource limits", () => {
   it("truncates oversized bodies", async () => {
     const big = "x".repeat(300_000);

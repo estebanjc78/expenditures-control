@@ -47,6 +47,7 @@ button { cursor: pointer; }
 .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px 12px; margin-bottom: 20px; flex-wrap: wrap; }
 .label { font-size: 13px; color: var(--ink-2); }
 .muted { color: var(--muted); }
+.sub { color: var(--muted); font-size: 12px; margin-top: 1px; }
 .num { font-variant-numeric: tabular-nums; }
 td.num { white-space: nowrap; }
 

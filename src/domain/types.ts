@@ -12,6 +12,8 @@ export interface Movement {
   readonly bank: string;
   readonly kind: Kind;
   readonly category: Category | null;
+  /** What the charge was for or how it was converted (e.g. "Plan Pro (mensual)", "USD 20.00 · estimado"). */
+  readonly detail: string | null;
 }
 
 export interface MovementInput {
@@ -24,4 +26,5 @@ export interface MovementInput {
   readonly category?: Category;
   /** Used only when neither the caller nor a merchant rule decides a category (e.g. a parser knows it is a transfer). */
   readonly suggestedCategory?: Category;
+  readonly detail?: string;
 }

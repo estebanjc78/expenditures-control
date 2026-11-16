@@ -44,10 +44,29 @@ CREATE TABLE IF NOT EXISTS mail_log (
   outcome TEXT NOT NULL,
   subject TEXT
 );
+CREATE TABLE IF NOT EXISTS fx_rates (
+  currency TEXT NOT NULL,
+  date TEXT NOT NULL,
+  rate REAL NOT NULL,
+  PRIMARY KEY (currency, date)
+);
 `;
+
+/** Columns added after the first release: databases created before them get them on open. */
+const ADDED_COLUMNS: readonly { table: string; column: string; ddl: string }[] = [
+  { table: "movements", column: "detail", ddl: "TEXT" },
+];
+
+function addMissingColumns(db: DatabaseSync): void {
+  for (const { table, column, ddl } of ADDED_COLUMNS) {
+    const have = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column);
+    if (!have) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+  }
+}
 
 export function openDb(path: string): DatabaseSync {
   const db = new DatabaseSync(path);
   db.exec(SCHEMA);
+  addMissingColumns(db);
   return db;
 }

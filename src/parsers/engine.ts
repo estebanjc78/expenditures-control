@@ -2,6 +2,7 @@ import { cleanText } from "../domain/sanitize.js";
 import { parseMoney } from "./amount.js";
 import { parseDateText } from "./date.js";
 import { readFields } from "./fields.js";
+import { DATABASE_CURRENCY } from "./profile.js";
 import type { BankProfile, Extractor, ProfileTemplate } from "./profile.js";
 import { safeMatch } from "./safe-regex.js";
 import { normalizeEmailText } from "./text.js";
@@ -10,6 +11,7 @@ import type { ParseResult, ParserInput } from "./types.js";
 
 const MAX_VALUE_CHARS = 160;
 const MAX_MERCHANT_CHARS = 80;
+const MAX_DETAIL_CHARS = 120; // a product description is longer than a merchant name
 
 function fold(text: string): string {
   return text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -61,17 +63,29 @@ export function runProfile(profile: BankProfile, input: ParserInput): ParseResul
   const fields = readFields(scoped, labelsOf(template), false);
 
   const money = parseMoney(valueOf(template.amount, fields, scoped) ?? "", profile.currency);
-  const merchant = cleanText(valueOf(template.merchant, fields, scoped) ?? "", MAX_MERCHANT_CHARS);
-  if (!money || !merchant || !template.kind) return { status: "unrecognized" };
-  if (money.currency !== profile.currency) {
-    return { status: "review", reason: `Importe en otra moneda (${money.currency}): no se registra sin confirmar con el usuario` };
-  }
-  const amount = Math.round(money.value);
-  if (amount <= 0) return { status: "unrecognized" };
+  const merchant = cleanText(valueOf(template.merchant, fields, scoped) ?? "", template.action === "detail" ? MAX_DETAIL_CHARS : MAX_MERCHANT_CHARS);
+  if (!money || !merchant) return { status: "unrecognized" };
 
   const rawDate = template.date ? valueOf(template.date, fields, scoped) : null;
   const date = template.date ? (rawDate ? parseDateText(rawDate, profile.dateFormats) : null) : localDate(input.receivedAt, profile.timezone);
   if (!date) return { status: "unrecognized" };
+
+  if (template.action === "detail") {
+    const amount = Math.round(money.value);
+    if (money.currency !== profile.currency || amount <= 0) return { status: "unrecognized" };
+    return { status: "detail", detail: { date, amount, description: merchant, matchMerchant: template.matchMerchant ?? [] } };
+  }
+
+  if (!template.kind) return { status: "unrecognized" };
+  const home = profile.foreignCurrency === "convert" ? DATABASE_CURRENCY : profile.currency;
+  if (money.currency !== home) {
+    if (profile.foreignCurrency === "convert" && money.value > 0) {
+      return { status: "foreign", foreign: { date, merchant, kind: template.kind, currency: money.currency, value: money.value } };
+    }
+    return { status: "review", reason: `Importe en otra moneda (${money.currency}): no se registra sin confirmar con el usuario` };
+  }
+  const amount = Math.round(money.value);
+  if (amount <= 0) return { status: "unrecognized" };
 
   return { status: "movement", movement: { date, amount, merchant, kind: template.kind } };
 }

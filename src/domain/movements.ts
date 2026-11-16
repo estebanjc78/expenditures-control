@@ -27,6 +27,7 @@ export const movementInputSchema = z.object({
   kind: z.enum(["gasto", "ingreso", "transferencia_propia"]),
   category: z.enum(CATEGORIES).optional(),
   suggestedCategory: z.enum(CATEGORIES).optional(),
+  detail: z.string().max(200).optional(),
 });
 
 function parseInput(input: MovementInput): MovementInput {
@@ -49,11 +50,11 @@ export function addMovement(
   const category = m.category ?? (m.kind === "gasto" ? lookupCategory(db, m.merchant) ?? m.suggestedCategory ?? null : null);
   const res = db
     .prepare(
-      `INSERT INTO movements (source_id, date, amount, merchant, bank, kind, category)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO movements (source_id, date, amount, merchant, bank, kind, category, detail)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(source_id) DO NOTHING`,
     )
-    .run(m.sourceId ?? null, m.date, m.amount, m.merchant, normalizeBank(m.bank), m.kind, category);
+    .run(m.sourceId ?? null, m.date, m.amount, m.merchant, normalizeBank(m.bank), m.kind, category, m.detail ?? null);
   if (Number(res.changes) > 0) {
     return { id: Number(res.lastInsertRowid), duplicate: false, needsClassification: m.kind === "gasto" && category === null };
   }

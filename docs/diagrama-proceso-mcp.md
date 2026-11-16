@@ -28,7 +28,10 @@ flowchart TD
     L --> P
     N -->|"Sí: incluidas o aprendidas"| K{"¿Qué es el aviso?"}
     K -->|"Rechazado o duplicado"| X["Se omite y se recuerda"]
-    K -->|"Importe en otra moneda sin valor en pesos"| R["Se reporta para revisión"]
+    K -->|"Importe en otra moneda sin valor en pesos"| R["Si la regla lo permite se pasa a pesos con la TRM del día y se marca estimado; si no, se reporta para revisión"]
+    R -->|"Convertido, y el banco no avisó ese cobro"| T
+    K -->|"Recibo que explica un cobro genérico, por ejemplo Apple.com/bill"| Q["Se escribe el producto en el movimiento del banco con el mismo monto y fecha"]
+    Q --> DB
     K -->|"Formato desconocido"| Y["Se lista como no reconocido"]
     K -->|"Movimiento"| T["Se guarda como gasto, ingreso o entre cuentas: USD a COP es ingreso y el pago de tarjeta es entre cuentas. PSE y transferencias a personas reciben su categoría solas"]
     T --> DB[("SQLite local")]
@@ -73,4 +76,5 @@ flowchart TD
 10. **Reporte.** `ver_panel` muestra dentro del chat un reporte interactivo: el gasto del mes, el ritmo contra el mes anterior, categorías que se expanden, un gráfico por día y una tabla con búsqueda. El reporte pide sus datos con `datos_panel`, una herramienta que el modelo no ve, y Claude solo recibe un resumen corto.
 11. **Resaltado.** Si el usuario dice "no encuentro la transferencia del alquiler", Claude llama a `ver_panel` con `resaltar`. El servidor entiende "alquiler" como un concepto de la lista de gastos fijos (o un nombre, un monto o una categoría), busca el movimiento en cualquier mes y el reporte se abre en el mes correcto con la fila resaltada.
 12. Si el cliente no soporta MCP Apps, `abrir_panel` abre el mismo panel en el navegador. Solo escucha en `127.0.0.1`, exige un token secreto y es de solo lectura.
-13. Los totales no incluyen impuestos ni cargos bancarios (4x1000, IVA, comisiones, cuotas de manejo), que ningún correo trae y solo aparecen en el extracto; el reporte lo aclara al pie del gráfico.
+13. **Recibos.** Un remitente que no es banco (una tienda de aplicaciones, un servicio en dólares) se aprende igual. Si su recibo solo explica un cobro que el banco ya avisó con un nombre genérico, el producto se escribe en ese movimiento (mismo monto, fecha con hasta 3 días de diferencia). Si es un cobro en dólares que el banco nunca avisa, se registra en pesos con la TRM del día y queda marcado como estimado; si el aviso del banco ya existía, no se cuenta dos veces.
+14. Los totales no incluyen impuestos ni cargos bancarios (4x1000, IVA, comisiones, cuotas de manejo), que ningún correo trae y solo aparecen en el extracto; el reporte lo aclara al pie del gráfico.

@@ -4,6 +4,7 @@ import { runProfile } from "../parsers/engine.js";
 import { profileSchema } from "../parsers/profile.js";
 import type { BankProfile } from "../parsers/profile.js";
 import { normalizeEmailText } from "../parsers/text.js";
+import type { ParseResult } from "../parsers/types.js";
 
 const ADDRESS_RE = /^[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}$/;
 const DOMAIN_KEY_RE = /^@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}$/;
@@ -68,6 +69,11 @@ export function findProfile(db: DatabaseSync, address: string): StoredProfile | 
   return null;
 }
 
+/** Examples needed to save a format. Several notice types need variety (3); a sender with a single kind of notice has no variants to cover, so 1 confirmed example is enough. */
+export function minimumExamples(profile: BankProfile): number {
+  return profile.templates.length === 1 ? 1 : 3;
+}
+
 /* ---------- testing rules against confirmed examples ---------- */
 
 export const sampleSchema = z.object({
@@ -84,6 +90,21 @@ export const sampleSchema = z.object({
       merchant: z.string().min(1).max(120),
       kind: z.enum(["gasto", "ingreso", "transferencia_propia"]),
     }),
+    /** A notice in another currency (profile.foreignCurrency "convert"): the amount in that currency, before conversion. */
+    z.object({
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD"),
+      merchant: z.string().min(1).max(120),
+      kind: z.enum(["gasto", "ingreso", "transferencia_propia"]),
+      foreign: z.object({ currency: z.string().length(3), value: z.number().positive() }),
+    }),
+    /** A receipt that describes an existing movement (template action "detail"). */
+    z.object({
+      detail: z.object({
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD"),
+        amount: z.number().int().positive(),
+        description: z.string().min(1).max(120),
+      }),
+    }),
   ]),
 });
 export type Sample = z.infer<typeof sampleSchema>;
@@ -99,23 +120,54 @@ export interface SampleResult {
 
 const same = (a: string, b: string): boolean => normalizeEmailText(a).toLowerCase() === normalizeEmailText(b).toLowerCase();
 
+type Expected = Sample["expected"];
+
+function compare(label: string, expected: string | number, got: string | number, problems: string[]): void {
+  if (expected !== got) problems.push(`${label}: esperado ${expected}, leído ${got}`);
+}
+
+function checkResult(exp: Expected, result: ParseResult): string[] {
+  const problems: string[] = [];
+  const wrongKind = (want: string): string => `se esperaba ${want}, pero el resultado fue "${result.status}"${result.status === "review" ? ` (${result.reason})` : ""}`;
+  if ("skip" in exp) {
+    if (result.status !== "skip") problems.push(`se esperaba que se omitiera, pero el resultado fue "${result.status}"`);
+  } else if ("detail" in exp) {
+    if (result.status !== "detail") return [wrongKind("un recibo que describe un movimiento")];
+    compare("fecha", exp.detail.date, result.detail.date, problems);
+    compare("monto", exp.detail.amount, result.detail.amount, problems);
+    if (!same(result.detail.description, exp.detail.description)) problems.push(`descripción: esperada "${exp.detail.description}", leída "${result.detail.description}"`);
+  } else if ("foreign" in exp) {
+    if (result.status !== "foreign") return [wrongKind("un importe en otra moneda para convertir")];
+    const got = result.foreign;
+    compare("fecha", exp.date, got.date, problems);
+    compare("moneda", exp.foreign.currency.toUpperCase(), got.currency, problems);
+    compare("importe", exp.foreign.value, got.value, problems);
+    compare("tipo", exp.kind, got.kind, problems);
+    if (!same(got.merchant, exp.merchant)) problems.push(`comercio: esperado "${exp.merchant}", leído "${got.merchant}"`);
+  } else if (result.status !== "movement") {
+    return [wrongKind("un movimiento")];
+  } else {
+    const got = result.movement;
+    compare("fecha", exp.date, got.date, problems);
+    compare("monto", exp.amount, got.amount, problems);
+    compare("tipo", exp.kind, got.kind, problems);
+    if (!same(got.merchant, exp.merchant)) problems.push(`comercio: esperado "${exp.merchant}", leído "${got.merchant}"`);
+  }
+  return problems;
+}
+
+function gotOf(result: ParseResult): { got?: unknown } {
+  if (result.status === "movement") return { got: result.movement };
+  if (result.status === "foreign") return { got: result.foreign };
+  if (result.status === "detail") return { got: result.detail };
+  return {};
+}
+
 export function testProfile(profile: BankProfile, samples: readonly Sample[]): SampleResult[] {
   return samples.map((sample, index) => {
     const receivedAt = sample.receivedAt ? Date.parse(sample.receivedAt) : Date.now();
     const result = runProfile(profile, { subject: sample.subject, text: sample.body, receivedAt: Number.isNaN(receivedAt) ? Date.now() : receivedAt });
-    const problems: string[] = [];
-    const exp = sample.expected;
-    if ("skip" in exp) {
-      if (result.status !== "skip") problems.push(`se esperaba que se omitiera, pero el resultado fue "${result.status}"`);
-    } else if (result.status !== "movement") {
-      problems.push(`se esperaba un movimiento, pero el resultado fue "${result.status}"${result.status === "review" ? ` (${result.reason})` : ""}`);
-    } else {
-      const got = result.movement;
-      if (got.date !== exp.date) problems.push(`fecha: esperada ${exp.date}, leída ${got.date}`);
-      if (got.amount !== exp.amount) problems.push(`monto: esperado ${exp.amount}, leído ${got.amount}`);
-      if (got.kind !== exp.kind) problems.push(`tipo: esperado ${exp.kind}, leído ${got.kind}`);
-      if (!same(got.merchant, exp.merchant)) problems.push(`comercio: esperado "${exp.merchant}", leído "${got.merchant}"`);
-    }
-    return { index, subject: sample.subject.slice(0, 60), pass: problems.length === 0, status: result.status, problems, ...(result.status === "movement" ? { got: result.movement } : {}) };
+    const problems = checkResult(sample.expected, result);
+    return { index, subject: sample.subject.slice(0, 60), pass: problems.length === 0, status: result.status, problems, ...gotOf(result) };
   });
 }

@@ -153,6 +153,11 @@ describe("parseBbva", () => {
     });
   });
 
+  it("skips the sign-in confirmations, which are not movements and would otherwise be downloaded again on every sync", () => {
+    const r = parseBbva({ subject: "Importante: Confirmación de ingreso en nuestros canales digitales.", text: "Ingresaste a la Banca por Internet", receivedAt: RECEIVED });
+    expect(r.status).toBe("skip");
+  });
+
   it("skips 'en proceso' because 'va en camino' carries the same transfer", () => {
     const r = parseBbva({ subject: "Tu transferencia está en proceso", text: onTheWayText, receivedAt: RECEIVED });
     expect(r.status).toBe("skip");

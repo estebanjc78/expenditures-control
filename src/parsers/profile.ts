@@ -23,7 +23,10 @@ const templateSchema = z
     /** The template applies when the subject contains ANY of `subjectContains` (if given) and the text contains ALL of `bodyContains` (if given). */
     subjectContains: textList.optional(),
     bodyContains: textList.optional(),
-    action: z.enum(["register", "skip"]).default("register"),
+    /** register: a movement; skip: not a movement; detail: names what an existing movement was for (does not create one). */
+    action: z.enum(["register", "skip", "detail"]).default("register"),
+    /** For action "detail": the merchants (as another sender reports them) this receipt can describe, e.g. ["apple.com/bill"]. */
+    matchMerchant: textList.optional(),
     skipReason: z.string().trim().max(100).optional(),
     kind: z.enum(["gasto", "ingreso", "transferencia_propia"]).optional(),
     amount: extractor.optional(),
@@ -44,13 +47,24 @@ const templateSchema = z
         if (!t[key]) ctx.addIssue({ code: "custom", message: `template "${t.name}": "${key}" is required when action is register` });
       }
     }
+    if (t.action === "detail") {
+      for (const key of ["amount", "merchant", "date", "matchMerchant"] as const) {
+        const missing = key === "matchMerchant" ? !t.matchMerchant?.length : !t[key];
+        if (missing) ctx.addIssue({ code: "custom", message: `template "${t.name}": "${key}" is required when action is detail (merchant holds the description of what was bought)` });
+      }
+    }
   });
+
+/** The currency every amount in the database is stored in; notices in another currency can be converted to it. */
+export const DATABASE_CURRENCY = "COP";
 
 export const profileSchema = z.object({
   /** Short lowercase bank name stored with every movement, e.g. "galicia". */
   bank: z.string().trim().toLowerCase().min(2).max(30),
-  /** Currency of the amounts in this bank's notices (ISO 4217). Amounts in another currency are reported, not registered. */
+  /** Currency of the amounts in this bank's notices (ISO 4217). */
   currency: z.string().trim().toUpperCase().length(3).default("COP"),
+  /** What to do with an amount in another currency: report it for review, or convert it to COP (the database currency) with that day's official rate, marked as an estimate. With "convert", `currency` is what bare amounts in the notices mean (e.g. USD). */
+  foreignCurrency: z.enum(["review", "convert"]).default("review"),
   /** IANA time zone used to date a movement by the mail's date when the notice has none. */
   timezone: z.string().trim().min(3).max(60).default("America/Bogota"),
   /** Date formats found in the notices, tried in order. */

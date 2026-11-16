@@ -7,6 +7,9 @@ const MAX_BODY_CHARS = 200_000;
 const MAX_PAGES = 50;
 const REQUEST_TIMEOUT_MS = 30_000;
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+const QUOTA_RE = /quota|rate limit/i;
+const QUOTA_WAIT_MS = 15_000; // the per-minute window needs real time to clear, not milliseconds
+const QUOTA_HELP = "Google limitó temporalmente las lecturas de Gmail (límite de lecturas por minuto). Espera un minuto y vuelve a ejecutarlo: lo ya cargado se conserva y continúa donde quedó.";
 
 interface Part {
   mimeType?: string;
@@ -63,12 +66,14 @@ export class GmailApiSource implements MailSource {
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       if (res.ok) return (await res.json()) as T;
-      if (RETRYABLE.has(res.status) && attempt < MAX_ATTEMPTS) {
-        await this.sleep(500 * attempt);
+      const detail = ((await res.json().catch(() => ({}))) as { error?: { message?: string } }).error?.message ?? res.statusText;
+      // Google reports the per-minute quota as 403 (not 429), so it is recognised by its message.
+      const overQuota = res.status === 429 || (res.status === 403 && QUOTA_RE.test(detail));
+      if (attempt < MAX_ATTEMPTS && (overQuota || RETRYABLE.has(res.status))) {
+        await this.sleep(overQuota ? QUOTA_WAIT_MS * attempt : 500 * attempt);
         continue;
       }
-      const detail = ((await res.json().catch(() => ({}))) as { error?: { message?: string } }).error?.message ?? res.statusText;
-      throw new Error(`Gmail API ${res.status}: ${detail}`);
+      throw new Error(overQuota ? QUOTA_HELP : `Gmail API ${res.status}: ${detail}`);
     }
   }
 

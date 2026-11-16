@@ -17,8 +17,29 @@ export interface ParsedMovement {
   readonly suggestedCategory?: Category;
 }
 
+/** A movement whose amount is in another currency: the caller converts it to the database currency. */
+export interface ForeignMovement {
+  readonly date: string;
+  readonly merchant: string;
+  readonly kind: Kind;
+  readonly currency: string; // ISO 4217
+  readonly value: number; // in `currency`
+}
+
+/** A receipt that names what a charge was for, to be matched with a movement that already exists. */
+export interface MovementDetail {
+  readonly date: string;
+  readonly amount: number;
+  readonly description: string;
+  /** Only movements whose merchant contains one of these (accents and case ignored) can be matched. */
+  readonly matchMerchant: readonly string[];
+}
+
 export type ParseResult =
   | { readonly status: "movement"; readonly movement: ParsedMovement }
+  | { readonly status: "foreign"; readonly foreign: ForeignMovement }
+  /** Not a movement: it adds a description to a movement that another sender already reported. */
+  | { readonly status: "detail"; readonly detail: MovementDetail }
   /** A mail that is known not to be a movement (rejected purchase, duplicate notice). */
   | { readonly status: "skip"; readonly reason: string }
   /** A real movement the parser will not guess (foreign currency): the user decides. */

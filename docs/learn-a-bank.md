@@ -37,9 +37,17 @@ Rules are data, not code. One profile per bank, with one template per kind of no
 
 - A value is read with `{"label": "Importe"}` (the text after that label, up to the next label), `{"regex": "por \\$ ([\\d.,]+)"}` (first capture group) or `{"fixed": "Transferencia propia"}`.
 - `delimiters` lists the other labels of the notice so each value stops where the next one starts. `endMarkers` cut off the legal footer.
-- Amounts accept both `1.234,56` and `1,234.56`. Dates: `YYYY-MM-DD`, `DD/MM/YYYY`, `MM/DD/YYYY`, `DD-MM-YYYY`, `DD.MM.YYYY`, `DD/MM/YY`, `YYYY/MM/DD` and named months (`5 nov 2026`, `12 de noviembre de 2026`).
-- Amounts in another currency than the profile's are reported for your review, never registered.
+- Amounts accept both `1.234,56` and `1,234.56`. Dates: `YYYY-MM-DD`, `DD/MM/YYYY`, `MM/DD/YYYY`, `DD-MM-YYYY`, `DD.MM.YYYY`, `DD/MM/YY`, `YYYY/MM/DD` and named months (`5 nov 2026`, `12 de noviembre de 2026`, `November 5, 2026`).
+- Amounts in another currency than the profile's are reported for your review, never registered, unless the profile sets `"foreignCurrency": "convert"` (see below).
 - If a notice has no date of its own, the mail's date in the profile's time zone is used.
+
+## Receipts that are not from a bank
+
+The same mechanism reads receipts from shops and services, in two cases.
+
+**A charge in dollars that the bank never reports.** A shop that bills a card from another bank sends a receipt in USD with no peso value. Set `"currency": "USD"` and `"foreignCurrency": "convert"`: the receipt is registered in pesos using that day's official exchange rate (the Colombian TRM, public data, only a date is sent) and marked "estimado" next to the original amount. If your bank's own notice for the same charge already exists (same merchant, a few days apart, similar amount), the receipt is skipped so it is never counted twice. Without a rate it is listed for review. A sender that only ever sends one kind of notice (a single template) needs just 1 confirmed example instead of 3.
+
+**A generic charge that a receipt explains.** A bank reports an app store charge as `Apple.com/bill` and nothing else. A template with `"action": "detail"` and `"matchMerchant": ["apple.com/bill"]` reads the receipt's total, date and product and, instead of creating a movement, writes the product name on the movement that has the same amount and date (up to 3 days apart). The merchant and category stay as they were; the report shows the product under the merchant. If no single movement fits, nothing changes and the receipt is tried again on the next sync. Expected values for these examples: `{"detail": {"date", "amount", "description"}}`, and `{"date", "merchant", "kind", "foreign": {"currency", "value"}}` for converted receipts.
 
 ## Tools
 

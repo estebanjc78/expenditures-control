@@ -9,7 +9,7 @@ function filteredMovements() {
     if (f.category && (m.kind !== "gasto" || (m.category || "sin_categoria") !== f.category)) return false;
     if (f.day && Number(m.date.slice(8, 10)) !== f.day) return false;
     if (f.merchant && plain(m.merchant) !== f.merchant.key) return false;
-    return !q || plain(m.merchant).indexOf(q) >= 0;
+    return !q || plain(m.merchant).indexOf(q) >= 0 || (!!m.detail && plain(m.detail).indexOf(q) >= 0);
   });
   var key = state.sort.key, dir = state.sort.dir;
   return rows.sort(function (a, b) {
@@ -75,7 +75,7 @@ function renderMovements() {
   var body = shown.map(function (m) {
     return h("tr", { class: hl && hl.ids.has(m.id) ? "hl" : null }, [
       h("td", { class: "muted num", text: dayLabel(m.date) }),
-      h("td", { text: m.merchant }),
+      h("td", null, [m.merchant, m.detail ? h("div", { class: "sub", text: m.detail }) : null]),
       h("td", { class: "hide-sm" }, h("span", { class: "tag", text: kindLabel(m) })),
       h("td", { class: "hide-sm" }, h("span", { class: "tag", text: m.bank.toUpperCase() })),
       h("td", { class: "r num amount" + (m.kind === "ingreso" ? " in" : ""), text: (m.kind === "ingreso" ? "+" : "") + money(m.amount) })

@@ -71,6 +71,17 @@ describe("learning a bank from examples (formatos_banco / configurar_formato_ban
     expect(res.text).toMatch(/al menos 3/);
   });
 
+  it("accepts a single example when the sender only ever sends one kind of notice", async () => {
+    const { call } = await connect();
+    const single = { ...profile, templates: [profile.templates[1]!] };
+    const out = (await call("configurar_formato_banco", { sender: SENDER, profile: single, samples: samples.slice(0, 1) })).json;
+    expect(out).toMatchObject({ saved: true, examples: 1, passing: 1 });
+    // two notice types still need variety
+    const refused = await call("configurar_formato_banco", { sender: "otro@bancoejemplo.com.ar", profile, samples: samples.slice(0, 1) });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/al menos 3/);
+  });
+
   it("does not save when an example fails, and says exactly what was read wrong", async () => {
     const { call } = await connect();
     const wrong = [...samples.slice(0, 3), { ...samples[3]!, expected: { ...(samples[3]!.expected as object), amount: 99999 } }];
